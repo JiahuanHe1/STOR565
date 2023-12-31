@@ -1,0 +1,319 @@
+
+# Project Proposal
+
+# Dataset
+
+Our dataset is tweets from 03-16-2020 to 04-14-2020. There are 6 variables: UserName, ScreenName, Location, TweetAt, OriginalTweet, and Sentiment.
+
+"UserName" and "ScreenName" are two varibles to identify the rows, and they seem to be reduntant. We can use a new column names "id."
+"Location" stands for the place where the tweet was posted. "TweetAt" is the date of the tweet. "OriginalTweet" is the tweet message, and "Sentiment" is the mental state of the person who posted the current tweet.
+
+The dimention of the data is 41157x6.
+
+Our goal of interest is the Sentiment column.
+
+The data can be found at Kaggle with the link: [https://www.kaggle.com/datatattle/covid-19-nlp-text-classification](https://www.kaggle.com/datatattle/covid-19-nlp-text-classification)
+
+# Motivations and Goals
+
+Everyone's life has been dramatically changed since COVID started. People are facing more difficulties at work, school, and daily lives. And mental health issues have been a serious public health question. According to a research by NHIS, the average share of aults reporting anxiety and depression has increased from 11.0% in 2019 to 41.1% in 2021. But what can we do to help and care for those who are depressed? What we are trying to find in this project is how COVID has affected our emotions based on tweet posts, and how we can predict the users' emotions based on their tweets. This is meaningful because we can learn what factors are producing depression, and what factors can help improve our appetite for life. This result can be used in companies and school to prevent employees' and students' from being too stressful and maintain good mental health conditions.
+
+# EDA
+
+```{r, result='hide', message=FALSE}
+library(tidyverse)
+library(textstem)
+library(reticulate)
+library(NLP)
+library(knitr)
+library(wordcloud)
+library(RColorBrewer)
+library(wordcloud2)
+library(tm)
+```
+
+
+## Import Data and Some Cleaning
+
+Our data has 6 columns: UserName, ScreenName, Location, TweetAt, OriginalTweet, and Sentiment, then we use head(data) to take a brief look at the data and interpret what each variable stands for. 
+
+"UserName" and "ScreenName" are two varibles to identify the rows, and they seem to be reduntant. We can use a new column names "id."
+"Location" stands for the place where the tweet was posted. "TweetAt" is the date of the tweet. "OriginalTweet" is the tweet message, and "Sentiment" is the mental state of the person who posted the current tweet.
+
+The dimention of the data is 41157x6.
+
+```{r}
+data <- read.csv("Corona_NLP_train.csv", encoding = "UTF-8")
+test = read.csv("Corona_NLP_test.csv")
+head(data)
+names(data)
+dim(data)
+```
+
+## Explore the variables we have
+
+
+```{r}
+data <- data %>%
+  mutate(TweetAt = as.factor(TweetAt ), Sentiment = as.factor(Sentiment))
+
+levels((data$TweetAt))
+levels((data$Sentiment))
+
+length(unique(data$UserName))
+length(unique(data$ScreenName))
+```
+
+We use a new "id" column to substitute "UserName" and "ScreeName." 
+```{r}
+data <- data %>%
+  select(c(-1,-2)) %>%
+  mutate(id = c(1:41157)) %>%
+  select(c(5,1,2,3,4))
+
+test <- test %>%
+  select(c(-1,-2)) %>%
+  mutate(id = c(1:3798)) %>%
+  select(c(5,1,2,3,4))
+
+head(data)
+```
+
+## Add more columns to the data for interpretation
+
+Since the column "OriginalTweet" is a long list of char, it is hard for interpretation. We move extract some information from this column to create new variables. Here, "TweetLength" is the number of character. "NumUpperCase" is the number of upper case characters. "AtPresent" is a binary indicator that shows whether there is an "@" character (or whether the poster wanted others to see the tweet). We also changed "Location" to be a factor because the date is discrete. Note we didn't create thes columns randomly. "Tokenied" is a list of words based on the OriginalTweet (seperate the tweet into a list of words divided by space). These variables are what we think to be related to our goal of interest, which is the Sentiment column.
+
+```{r, error=TRUE}
+data <- data %>%
+  mutate(TweetLength = nchar(OriginalTweet, allowNA = TRUE, keepNA = TRUE),
+         NumUpperCase = str_count(OriginalTweet, "[A-Z]"),
+         AtPresent = grepl( "@", iconv(OriginalTweet, "UTF-8", "UTF-8",sub=''), fixed = TRUE),
+         Location = as.factor(Location)) %>%
+         na.omit()
+
+str_split(data[1,]$OriginalTweet, " ")
+
+data <- data %>%
+  mutate(tokenized = str_split("1 2 3", " "))
+
+test <- test %>%
+  mutate(TweetLength = nchar(OriginalTweet, allowNA = TRUE, keepNA = TRUE),
+         NumUpperCase = str_count(OriginalTweet, "[A-Z]"),
+         AtPresent = grepl( "@", iconv(OriginalTweet, "UTF-8", "UTF-8",sub=''), fixed = TRUE),
+         Location = as.factor(Location)) %>%
+         na.omit()
+
+str_split(test[1,]$OriginalTweet, " ")
+
+test <- test %>%
+  mutate(tokenized = str_split("1 2 3", " "))
+
+```
+
+```{r results='hide'}
+for (i in 1:nrow(data)) {
+  data[i,]$tokenized = str_split(data[i,]$OriginalTweet, " ")
+}
+
+for (i in 1:nrow(test)) {
+  test[i,]$tokenized = str_split(test[i,]$OriginalTweet, " ")
+}
+```
+
+```{r}
+data$tokenized[[1]]
+
+head(data)
+```
+
+
+## Distribution of the variables using histogram and barplot
+
+```{r, error=TRUE, warning=FALSE}
+data <- data %>%
+  mutate(TweetAt = as.Date(data$TweetAt, format = "%d-%m-%Y"))
+
+test <- test %>%
+  mutate(TweetAt = as.Date(test$TweetAt, format = "%d-%m-%Y"))
+
+hist_data <- data[,-c(2,3,4,5,8,9)]
+for (j in 1:ncol(hist_data)) {
+  hist(hist_data[,j], xlab=colnames(hist_data)[j],
+       main=paste("Histogram of", colnames(hist_data)[j]),
+       col="lightblue", breaks=20)
+}
+
+bar_data <- data[,-c(1,4,6,7,9)]
+for (j in 1:ncol(bar_data)) {
+  barplot(prop.table(table(iconv(bar_data[,j], "UTF-8", "UTF-8",sub=''))), xlab=colnames(bar_data)[j],
+       main=paste("Barplot of", colnames(bar_data)[j]),
+       col="lightblue", breaks=20)
+}
+```
+#### What do we learn from these plots?
+* The number of characters in a tweet is not normally distrbuted: the max frequency appears to be about 260 characters, but the frequency drops swiftly when the nuber approaches to 350. 
+
+* Most people do not include upper case letter in their tweet. Even if, the nuber is likely to be less than 20, which is a small number compared with the total number of characters.
+
+* The barplot of Location seem to be uninrerpretable because there are too many levels. But there are a few spikes.
+
+* The barplot of TweetAt shows the number of posts grows quickly in March. This is interesting because March of 2020 was an early time when the public started to follow COVID. But on March 28th, there is a concavity, and the number of posts was not as high as it was in March.
+
+* The barplot of Sentiment suggests that the number of Positive posts is a little higher than the number of Negative posts.
+
+* The barplot of AtPresent shows 70 percent of the tweet has an "@" character, meaning the person who posted it wanted someone else to see it. This might have some correlation to the Sentiment.
+
+## Word frequencies
+
+Since our data involves natural language, we are interested in the words. We have already tokenized the tweets, but we are still interested in what words are used. 
+
+```{r}
+words = c()
+for (i in 1:nrow(data)) {
+  for (j in 1:length(data[i,]$tokenized)) {
+    words[i*j] = data[i,]$tokenized[[1]][j]
+  }
+}
+
+words = c()
+for (i in 1:nrow(test)) {
+  for (j in 1:length(test[i,]$tokenized)) {
+    words[i*j] = test[i,]$tokenized[[1]][j]
+  }
+}
+```
+
+```{r}
+Top_100_words = sort(table(words), decreasing = TRUE)[1:100]
+head(Top_100_words)
+
+set.seed(1234) # for reproducibility 
+wordcloud(words = dimnames(Top_100_words)$words, freq = as.numeric(Top_100_words), min.freq = 1,           max.words=200, random.order=FALSE, rot.per=0.35,            colors=brewer.pal(8, "Dark2"))
+```
+
+
+```{r}
+barplot(Top_100_words[1:25], xlab="words",
+       main=paste("Histogram of Frequency"),
+       col="lightblue")
+```
+
+We use a word cloud plot and a barplot to show the top used words. We can see words like "The" and "I" takes a big part, which makes sense. The presence of "How," "What," and "When" suggests that people have question and are somewhat confused. We can also observe words such as "COVID-19," "#COVID," "food" and "grocery." These words reflect what the users concerns are and can give us a brief intuition of the investigation of "Sentiment." Interestingly, "Trump" was one of the top words used.
+
+## Correlation between the variables
+
+```{r}
+cor_data <- data %>%
+  mutate(Location = as.numeric(Location), TweetAt = as.numeric(TweetAt), Sentiment = as.numeric(Sentiment))
+pros.cor = cor(cor_data[,c(2,3,5,6,7,8)])
+round(pros.cor,3)   
+```
+
+TweetLength has a relatively strong correlation with Sentiment. But other variables do not show a strong relationship.
+
+```{r}
+# rearrange the levels
+data$Sentiment <- factor(data$Sentiment, levels = c("Extremely Negative","Negaive","Neutral","Positive","Extremely Positive"))
+test$Sentiment <- factor(test$Sentiment, levels = c("Extremely Negative","Negaive","Neutral","Positive","Extremely Positive"))
+levels(data$Sentiment)
+
+pairs(~ Sentiment + TweetLength + NumUpperCase + AtPresent + Location, data=cor_data)
+```
+
+This plot is hard to interpret because most of the variables are factors. We try to use boxplot to compare the means.
+
+```{r}
+par(mfrow=c(1,2))
+data <- data %>%
+  mutate(LengthRange = cut(data$TweetLength, breaks = seq(from=1, to=400, by=50)), upperRange = cut(data$NumUpperCase, breaks = seq(from=1, to=400, by=50)))
+
+test <- test %>%
+  mutate(LengthRange = cut(test$TweetLength, breaks = seq(from=1, to=400, by=50)), upperRange = cut(test$NumUpperCase, breaks = seq(from=1, to=400, by=50)))
+
+boxplot(Sentiment~LengthRange, data=data, main="",
+     xlab="Length Of Tweet", ylab="Sentiment")
+boxplot(Sentiment~AtPresent, data=data, main="",
+     xlab="If There is an \"@\"", ylab="Sentiment")
+boxplot(Sentiment~upperRange, data=data, main="",
+     xlab="Number of upper case letters", ylab="Sentiment")
+```
+
+From the boxplot, we see that the increase of length of the tweets does show a positive trend in increasing the sentiment. Whether there is an "@" does not show clear realtion with the sentiment. If the number of upper case character in the tweet is small, the sentiment is generanllg not bad, but when the number increases, the variance also increases, suggesting both happy and non happy people tend to use more upper case characters.
+
+### TTTT
+
+```{r}
+anodata <- data[,-c(1,3,4,9)]
+anodata 
+
+anotest <- test[,-c(1,3,4,9)]
+levels(anotest$Sentiment) = c(1,2,3,4,5)
+
+logMod = glm(Sentiment~., data=anodata[,-1], family = "binomial")
+anotest = na.omit(anotest)
+predict = predict(logMod, anotest)
+table(anotest[,2],round(predict,digits = 0))
+
+
+```
+
+```{r}
+library(naivebayes)
+library(dplyr)
+library(ggplot2)
+library(psych)
+library(e1071)
+```
+
+```{r}
+anodata = na.omit(anodata)
+model <- naiveBayes(Sentiment ~ ., data = anodata[,-1], usekernel = T) 
+summary(model)
+anotest
+p = predict(model, anotest)
+table(anotest[,2],p)
+```
+
+```{r}
+library(ISLR)
+library(tree)
+library(dplyr)
+library(tidyverse)
+library(randomForest)
+library(knitr)
+```
+
+
+```{r}
+anndata = droplevels(anodata)
+anntest = droplevels(anotest)
+sentiment.mod<-randomForest(Sentiment~.,data=anndata[,-1], importance=TRUE,ntree=10,mtry=(dim(anndata[,-1])[2]-1))
+sentiment.mod$importance
+importance(sentiment.mod)
+levels(anntest$Sentiment) = c("Extremely Negative", "Negative", "Neutral", "Positive", "Extremely Positive")
+anntest = droplevels(anntest)
+anntest = rbind(anndata[1,], anntest)
+anntest = anntest[-1,]
+ppp=predict(sentiment.mod, newdata=anntest[,-1])
+table(anntest$Sentiment, ppp)
+```
+
+
+
+```{r}
+test = read.csv("Corona_NLP_test.csv")
+test
+```
+
+# Preliminary ideas on what techniques we are going to apply
+
+Our goal is to classify the mental state.
+We are going to mainly use the techniques we learned in this class:
+
+* Logistic Regression
+
+* Classification (including Naive Bayes and other subset)
+
+* Recurrent Neural Network
+
+
